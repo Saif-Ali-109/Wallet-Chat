@@ -1,0 +1,31 @@
+▲ Next.js 16.2.4 (webpack)
+- Environments: .env
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 19.0s
+  Running TypeScript ...
+  Finished TypeScript in 14.7s ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/9) ...
+  Generating static pages using 3 workers (2/9) 
+  Generating static pages using 3 workers (4/9) 
+  Generating static pages using 3 workers (6/9) 
+✓ Generating static pages using 3 workers (9/9) in 589ms
+  Finalizing page optimization ...
+  Collecting build traces ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /chat
+├ ● /chat/[roomId]
+│ └ /chat/chat
+├ ○ /connect
+├ ○ /dashboard
+├ ○ /invite
+└ ○ /requests
+
+
+○  (Static)  prerendered as static content
+●  (SSG)     prerendered as static HTML (uses generateStaticParams)
+
