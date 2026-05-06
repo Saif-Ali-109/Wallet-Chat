@@ -7,7 +7,6 @@ import { generateKeyPair, storePrivateKey, validateKeyPair } from '../../lib/cry
 import { setEncryptedItem, getEncryptedItem } from '../../lib/storage';
 import { getApiBaseUrl } from '../../lib/api';
 
-
 import { useAccount, useSignMessage, useSwitchChain, useDisconnect } from 'wagmi';
 import { useWeb3Modal } from '@web3modal/wagmi/react';
 import { useChatContract } from '../../hooks/useChatContract';
@@ -20,7 +19,6 @@ export default function ConnectPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'connect' | 'keygen'>('connect');
   const [tempUser, setTempUser] = useState<any>(null);
-  const [tempToken, setTempToken] = useState<string | null>(null);
   const loginInProgress = useRef(false);
   
   const router = useRouter();
@@ -30,12 +28,11 @@ export default function ConnectPageContent() {
   const { switchChainAsync } = useSwitchChain();
   const { signMessageAsync } = useSignMessage();
   const { disconnect } = useDisconnect();
+  const { open } = useWeb3Modal();
+  const [web3ModalReady, setWeb3ModalReady] = useState(true);
 
   const chainId = activeChain?.id;
   const EXPECTED_CHAIN_ID = 11155111; // Sepolia
-
-  const { open } = useWeb3Modal();
-  const { registerIdentity } = useChatContract();
 
   const isAuthorizationRejected = (err: any) =>
     err?.code === 4001 ||
@@ -47,23 +44,24 @@ export default function ConnectPageContent() {
     console.log('[CONNECT] Component mounted');
   }, []);
 
+  const isOnSepolia = activeChain?.id === EXPECTED_CHAIN_ID;
+  const networkName = activeChain?.name || `Chain ID: ${activeChain?.id || 'Unknown'}`;
+
   useEffect(() => {
-    // Only redirect to dashboard if we have a token AND the wallet is actually connected
-    // This prevents being stuck in a dashboard loop when the wallet is disconnected.
-    const token = getEncryptedItem('auth_token');
+    // Only redirect to dashboard if wallet is actually connected
     const storedAddress = getEncryptedItem('auth_address');
     const storedPublicKey = getEncryptedItem('auth_publicKey');
     const hasPrivateKey = storedAddress
       ? !!localStorage.getItem(`chat_priv_${storedAddress.toLowerCase()}`)
       : false;
     
-    if (token && hasPrivateKey && storedPublicKey && isConnected && wagmiAddress?.toLowerCase() === storedAddress?.toLowerCase()) {
-      console.log('[CONNECT] Auth valid and wallet connected, redirecting to dashboard');
-      router.push('/dashboard');
+    if (hasPrivateKey && storedPublicKey && isConnected && wagmiAddress?.toLowerCase() === storedAddress?.toLowerCase()) {
+      console.log('[CONNECT] Wallet connected and keys present, redirecting to dashboard');
+      router.replace('/dashboard');
     }
   }, [router, isConnected, wagmiAddress]);
 
-  const handleAuthSuccess = useCallback(async (user: any, token: string) => {
+  const handleAuthSuccess = useCallback(async (user: any) => {
     console.log('[CONNECT] Auth success for:', user.publicAddress);
     const addr = user.publicAddress.toLowerCase();
 
@@ -76,16 +74,13 @@ export default function ConnectPageContent() {
     
     if (!user.publicKey || !storedPrivateKey || !hasMatchingKeyPair) {
       setTempUser(user);
-      setTempToken(token);
       setStep('keygen');
     } else {
-      setEncryptedItem('auth_token', token, addr);
       setEncryptedItem('auth_address', user.publicAddress, addr);
       setEncryptedItem('auth_publicKey', user.publicKey, addr);
       setEncryptedItem('auth_user_id', user._id, addr);
       
       // Also set as global active session
-      setEncryptedItem('auth_token', token);
       setEncryptedItem('auth_address', user.publicAddress);
       setEncryptedItem('auth_publicKey', user.publicKey);
       setEncryptedItem('auth_user_id', user._id);
@@ -99,6 +94,25 @@ export default function ConnectPageContent() {
     }
   }, [router, searchParams]);
 
+  const connectWithMetaMask = async () => {
+    if (loading || loginInProgress.current) return;
+    loginInProgress.current = true;
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { connect, connectors } = await import('wagmi/actions');
+      const metamaskConnector = connectors().find(c => c.id === 'injected' || c.name?.toLowerCase().includes('metamask'));
+      if (!metamaskConnector) throw new Error('MetaMask not found');
+      
+      await connect({ connector: metamaskConnector });
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect to MetaMask');
+      loginInProgress.current = false;
+      setLoading(false);
+    }
+  };
+
   const handleGenerateKeys = async () => {
     console.log('[CONNECT] Generating keys...');
     if (!window.crypto?.subtle) {
@@ -110,22 +124,12 @@ export default function ConnectPageContent() {
       const keys = await generateKeyPair();
       console.log('[CONNECT] Keys generated successfully');
 
-
-      console.log('[CONNECT] Registering public key on-chain...');
-      try {
-        await registerIdentity(keys.publicKey);
-        console.log('[CONNECT] Public key registered on-chain');
-      } catch (onChainError) {
-        console.warn('[CONNECT] On-chain registration failed, falling back to server-only:', onChainError);
-        // We can either block or fallback. We'll log the warning and let the server save it.
-      }
-      
+      // Save public key to server
+      console.log('[CONNECT] Saving public key to server...');
       const response = await fetch(`${SERVER_URL}/auth/public-key`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tempToken}`
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ publicKey: keys.publicKey }),
       });
 
@@ -134,13 +138,11 @@ export default function ConnectPageContent() {
       storePrivateKey(tempUser.publicAddress, keys.privateKey);
       
       const addr = tempUser.publicAddress.toLowerCase();
-      setEncryptedItem('auth_token', tempToken!, addr);
       setEncryptedItem('auth_address', tempUser.publicAddress, addr);
       setEncryptedItem('auth_publicKey', keys.publicKey, addr);
       setEncryptedItem('auth_user_id', tempUser._id, addr);
       
       // Also set as global active session for convenience
-      setEncryptedItem('auth_token', tempToken!);
       setEncryptedItem('auth_address', tempUser.publicAddress);
       setEncryptedItem('auth_publicKey', keys.publicKey);
       setEncryptedItem('auth_user_id', tempUser._id);
@@ -231,6 +233,7 @@ export default function ConnectPageContent() {
         const verifyResponse = await fetch(`${SERVER_URL}/auth/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ publicAddress, signature, walletType, chainId: EXPECTED_CHAIN_ID }),
         });
         
@@ -241,10 +244,10 @@ export default function ConnectPageContent() {
         const data = await verifyResponse.json();
         console.log('[CONNECT] Verification success');
         
-        if (data.token) {
-          await handleAuthSuccess(data.user, data.token);
+        if (data.user) {
+          await handleAuthSuccess(data.user);
         } else {
-          throw new Error('No token returned from server');
+          throw new Error('No user data returned from server');
         }
       } catch (fetchErr: any) {
         if (fetchErr.name === 'AbortError') {
@@ -262,15 +265,9 @@ export default function ConnectPageContent() {
         code: err.code,
         stack: err.stack
       });
-      if (isAuthorizationRejected(err)) {
-        setError('Authorization rejected by user. If you are seeing this immediately, click "Reset Session" below and try again.');
-      } else if (err.message?.toLowerCase().includes('expired') || err.name?.toLowerCase().includes('expired')) {
-        setError('Connection session expired or took too long. Please try again or refresh the page.');
-      } else if (err.name === 'AbortError') {
-        setError('Server request timed out. Please try again.');
-      } else {
-        setError(`${err.message || 'An error occurred'} (Check browser console)`);
-      }
+        if (isAuthorizationRejected(err)) {
+          setError('Wallet connection cancelled. Click "Connect Wallet" below to try again.');
+        }
     } finally {
       setLoading(false);
       loginInProgress.current = false;
@@ -314,7 +311,15 @@ export default function ConnectPageContent() {
             <div className="text-center space-y-2 mb-6">
               <h2 className="text-xl font-semibold text-text-primary">Connect your wallet</h2>
               <p className="text-sm text-text-muted">Choose a wallet to sign in and start chatting</p>
-            </div>
+              </div>
+
+              {activeChain && (
+                <div className={`text-xs font-medium px-3 py-1.5 rounded-full inline-block mx-auto ${
+                  isOnSepolia ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                }`}>
+                  {isOnSepolia ? '✓ Sepolia Network' : `⚠ ${networkName}`}
+                </div>
+              )}
 
             <div className="grid grid-cols-1 gap-4">
               <div className="flex flex-col gap-4">
@@ -331,6 +336,7 @@ export default function ConnectPageContent() {
                           await open();
                         } catch (e) {
                           console.error('Failed to open Web3Modal', e);
+                          setError('Popup blocked or Web3Modal failed to open. Please allow popups for this site and try again.');
                         }
                       }}
                       disabled={loading}
@@ -339,6 +345,39 @@ export default function ConnectPageContent() {
                       <Key className="w-5 h-5" />
                       Connect Wallet
                     </button>
+                    
+                    <div className="text-center text-xs text-text-muted">or</div>
+                    
+                    <button
+                      onClick={connectWithMetaMask}
+                      disabled={loading}
+                      className="w-full bg-[#f6851a] hover:bg-[#e2761b] text-white font-bold py-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2"
+                    >
+                      <Key className="w-5 h-5" />
+                      Connect MetaMask Directly
+                    </button>
+                    
+                    <button
+                      onClick={async () => {
+                        try {
+                          await disconnect();
+                        } catch (e) {}
+                        localStorage.clear();
+                        window.location.reload();
+                      }}
+                      className="text-xs text-text-muted hover:text-red-500 transition-colors py-2 text-center"
+                    >
+                      Stuck? Click here to Reset Session
+                    </button>
+                    
+                    {isConnected && !loading && (
+                       <button
+                         onClick={() => disconnect()}
+                         className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 text-xs font-bold py-2 rounded-xl transition-all"
+                       >
+                         Disconnect Wallet
+                       </button>
+                    )}
                     
                     <button
                       onClick={async () => {

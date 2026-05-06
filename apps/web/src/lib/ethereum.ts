@@ -3,7 +3,11 @@ import { sepolia } from 'wagmi/chains';
 import { walletConnect, injected, coinbaseWallet } from 'wagmi/connectors';
 import { Capacitor } from '@capacitor/core';
 
-export const projectId = 'aa08f17d20b4bd829127fd97bbf91f00';
+const projectIdEnv = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+if (!projectIdEnv) {
+  throw new Error('Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID environment variable');
+}
+export const projectId = projectIdEnv;
 
 const isNativePlatform = Capacitor.isNativePlatform();
 
@@ -46,4 +50,8 @@ export const getConfig = () => {
 // For backward compatibility if needed, but we should prefer getConfig()
 export const config = getConfig();
 
-export const CHAT_REGISTRY_ADDRESS = '0x878d7cD665048506ed1B233D3945595CDE2ebEc3';
+const chatRegistryEnv = process.env.NEXT_PUBLIC_CHAT_REGISTRY_ADDRESS;
+if (!chatRegistryEnv) {
+  throw new Error('Missing NEXT_PUBLIC_CHAT_REGISTRY_ADDRESS environment variable');
+}
+export const CHAT_REGISTRY_ADDRESS = chatRegistryEnv;

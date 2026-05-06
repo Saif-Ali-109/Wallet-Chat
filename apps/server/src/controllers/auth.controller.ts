@@ -7,13 +7,16 @@ import bs58 from 'bs58';
 import { User } from '../models/User';
 import { JWT_SECRET, EXPECTED_EVM_CHAIN_ID, JWT_EXPIRES_DAYS } from '../lib/constants';
 
-const CHAT_REGISTRY_ADDRESS = '0x878d7cD665048506ed1B233D3945595CDE2ebEc3';
+const CHAT_REGISTRY_ADDRESS = process.env.CHAT_REGISTRY_ADDRESS;
+if (!CHAT_REGISTRY_ADDRESS) {
+  throw new Error('Missing CHAT_REGISTRY_ADDRESS environment variable');
+}
 const REGISTRY_ABI = ["function getEncryptionKey(address user) view returns (bytes)"];
 
 async function fetchPublicKeyFromChain(address: string): Promise<string | null> {
   try {
     const provider = new ethers.JsonRpcProvider('https://ethereum-sepolia-rpc.publicnode.com');
-    const contract = new ethers.Contract(CHAT_REGISTRY_ADDRESS, REGISTRY_ABI, provider);
+    const contract = new ethers.Contract(CHAT_REGISTRY_ADDRESS as string, REGISTRY_ABI, provider);
     const keyBytes = await contract.getEncryptionKey(address);
     if (keyBytes && keyBytes !== '0x') {
       return ethers.toUtf8String(keyBytes);
@@ -143,7 +146,15 @@ export const verifySignature = async (req: Request, res: Response) => {
     );
 
     console.log(`[AUTH] Token Generated for ${user.publicAddress}`);
-    return res.status(200).json({ token, user });
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production', // Only true for HTTPS
+      sameSite: 'lax', // Changed from 'strict' to allow cross-site requests during development
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    return res.status(200).json({ user });
   } catch (error) {
     console.error('[AUTH] Error in verifySignature:', error);
     return res.status(500).json({ error: 'Internal server error' });

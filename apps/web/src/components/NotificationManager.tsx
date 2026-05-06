@@ -57,14 +57,15 @@ export default function NotificationManager() {
   // Fetch contacts to get names for notifications
   useEffect(() => {
     if (!userId) return;
-    const token = getEncryptedItem('auth_token');
-    if (!token) return;
 
     const fetchContacts = async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/chat/requests?userId=${userId}`, {
-          headers: getAuthenticatedHeaders(),
+        const res = await fetch(`${SERVER_URL}/chat/requests`, {
+          credentials: 'include',
         });
+        if (res.status === 401) {
+          return;
+        }
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data.error || 'Failed to fetch contacts');
@@ -81,23 +82,24 @@ export default function NotificationManager() {
   // Global socket connection
   useEffect(() => {
     if (!userId) return;
-    const token = getEncryptedItem('auth_token');
     const storedAddress = getEncryptedItem('auth_address');
-    if (!token || !storedAddress) return;
+    if (!storedAddress) return;
 
     const socket = io(SERVER_URL, {
-      auth: { token },
-      transports: ['polling', 'websocket'], // Allow fallback to polling if websocket fails
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
-      timeout: 30000, // Increase timeout to 30s
-      autoConnect: true,
+      timeout: 30000,
+      withCredentials: true, // Send cookies with socket connection
     });
     socketRef.current = socket;
     socket.on('connect_error', (err) => {
-      console.error('[Notification Socket] Connection error:', err.message);
+      // Don't spam console - auth errors are expected when not logged in
+      if (!err.message.includes('Auth') && !err.message.includes('token')) {
+        console.error('[Notification Socket] Connection error:', err.message);
+      }
     });
     socket.on('receive_message', async (payload: any) => {
       if (!payload?.sender) return;

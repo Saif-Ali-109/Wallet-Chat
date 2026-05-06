@@ -79,7 +79,6 @@ export const loadCachedContacts = (userId: string): CachedChatContact[] => {
 export const clearAuthSession = () => {
   if (typeof window === 'undefined') return;
 
-  removeEncryptedItem('auth_token');
   removeEncryptedItem('auth_address');
   removeEncryptedItem('auth_publicKey');
   removeEncryptedItem('auth_user_id');

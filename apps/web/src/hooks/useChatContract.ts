@@ -20,8 +20,19 @@ export function useChatContract() {
     })
   }
 
+  const sendTip = async (recipient: string, amountInWei: bigint) => {
+    return writeContract({
+      address: CHAT_REGISTRY_ADDRESS as `0x${string}`,
+      abi: ChatRegistryABI.abi,
+      functionName: 'sendMessage',
+      args: [recipient as `0x${string}`, stringToHex('tip')],
+      value: amountInWei,
+    })
+  }
+
   return {
     registerIdentity,
+    sendTip,
     hash,
     error,
     isPending,

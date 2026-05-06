@@ -9,16 +9,18 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 
 import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 import mediaRoutes from './routes/media';
 import notificationRoutes from './routes/notifications';
+import { setOnlineSocketsRef } from './controllers/chat.controller';
 import { ChatRequest } from './models/ChatRequest';
 import { User } from './models/User';
 import { Message } from './models/Message';
 import { isFcmConfigured, sendDataNotification } from './lib/fcm';
-import { JWT_SECRET, MONGODB_URI, PORT } from './lib/constants';
+import { JWT_SECRET, MONGODB_URI, PORT, connectDB } from './lib/constants';
 
 const app = express();
 const server = http.createServer(app);
@@ -85,6 +87,7 @@ const logTrace = (scope: string, event: string, details?: Record<string, unknown
 if (process.env.NODE_ENV === 'production') {
   app.use(helmet()); // Adds security headers (XSS, Clickjacking, etc.)
 }
+app.use(cookieParser());
 app.use(compression()); // Gzip compression for smaller response sizes
 app.use(morgan('combined')); // Production-grade logging
 
@@ -165,6 +168,8 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
+const onlineSocketsByUserId = new Map<string, Set<string>>();
+
 // ---------------------------------------------------------------------------
 // 3. Routes
 // ---------------------------------------------------------------------------
@@ -173,31 +178,31 @@ app.use('/chat', chatRoutes);
 app.use('/media', mediaRoutes);
 app.use('/notifications', notificationRoutes);
 
-// Health Check
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    uptime: process.uptime(),
-    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    onlineUsers: onlineSocketsByUserId.size
-  });
-});
-
-// Centralized Error Handler
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('[SERVER ERROR]', err.stack);
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal Server Error' : err.message
-  });
-});
+// Pass the online sockets map reference to the chat controller
+setOnlineSocketsRef(onlineSocketsByUserId);
 
 // ---------------------------------------------------------------------------
 // 4. Socket.IO Logic
 // ---------------------------------------------------------------------------
 
+// Rate limiting: track last message time per socket
+const messageTimestamps = new Map<string, number>();
+
 io.use((socket, next) => {
-  const token = socket.handshake.auth.token || socket.handshake.headers['authorization']?.split(' ')[1];
+  // Try socket auth first (for backward compatibility)
+  let token = socket.handshake.auth?.token;
   
+  // If not in auth, try to parse from cookies
+  if (!token) {
+    const cookieHeader = socket.handshake.headers.cookie;
+    if (cookieHeader) {
+      const cookies = Object.fromEntries(
+        cookieHeader.split('; ').map(c => c.split('='))
+      );
+      token = cookies['token'];
+    }
+  }
+
   if (!token) {
     console.log('[Socket Auth] REJECTED: No token provided');
     return next(new Error('Authentication error: No token provided'));
@@ -225,8 +230,6 @@ const isParticipantRoomId = (roomId: string, userAddress: string) => {
   return participants.length === 2 && participants.includes(normalizedAddress);
 };
 
-const onlineSocketsByUserId = new Map<string, Set<string>>();
-
 const getSocketRooms = (socket: { rooms: Set<string> }) => Array.from(socket.rooms.values());
 const getRoomMembers = (roomId: string) => Array.from(io.sockets.adapter.rooms.get(roomId) ?? []);
 const getOnlineSocketsForUser = (userId: string) => Array.from(onlineSocketsByUserId.get(userId) ?? []);
@@ -252,6 +255,7 @@ io.on('connection', (socket) => {
   userSockets.add(socket.id);
   onlineSocketsByUserId.set(currentUserId, userSockets);
   socket.join(`user:${currentUserId}`);
+  io.emit('user_online', { userId: currentUserId });
   logTrace('SOCKET', 'USER_ROOM_JOINED', {
     socketId: socket.id,
     userId: currentUserId,
@@ -385,6 +389,16 @@ io.on('connection', (socket) => {
     ack?: (payload: { ok: boolean; error?: string; messageId?: string; delivered?: boolean }) => void
   ) => {
     try {
+      // Rate limiting: max 1 msg per 500ms
+      const now = Date.now();
+      const last = messageTimestamps.get(socket.id) || 0;
+      if (now - last < 500) {
+        socket.emit('error', { message: 'Too many messages' });
+        ack?.({ ok: false, error: 'Too many messages' });
+        return;
+      }
+      messageTimestamps.set(socket.id, now);
+
       const { messageId, recipientPublicKey: recipientIdentifier, encryptedContent } = data;
       if (!recipientIdentifier || !encryptedContent) {
         console.log('[Socket] SEND FAILED: Missing recipient or content');
@@ -571,12 +585,27 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('typing_start', ({ roomId }) => {
+    socket.to(roomId).emit('user_typing', {
+      userId: currentUserId,
+      roomId
+    });
+  });
+
+  socket.on('typing_stop', ({ roomId }) => {
+    socket.to(roomId).emit('user_stopped_typing', {
+      userId: currentUserId,
+      roomId  
+    });
+  });
+
   socket.on('disconnect', () => {
     const ownedSockets = onlineSocketsByUserId.get(currentUserId);
     if (ownedSockets) {
       ownedSockets.delete(socket.id);
       if (ownedSockets.size === 0) {
         onlineSocketsByUserId.delete(currentUserId);
+        io.emit('user_offline', { userId: currentUserId });
       }
     }
     console.log(`[Socket] DISCONNECTED: ${currentUser.publicAddress}`);
@@ -587,6 +616,9 @@ io.on('connection', (socket) => {
       remainingUserSocketIds: getOnlineSocketsForUser(currentUserId),
       totalOnlineUsers: onlineSocketsByUserId.size,
     });
+
+    // Clean up rate limiting data
+    messageTimestamps.delete(socket.id);
   });
 });
 
@@ -601,7 +633,7 @@ async function startServer() {
       throw new Error('MONGODB_URI is required in production');
     }
 
-    await mongoose.connect(MONGODB_URI);
+    await connectDB();
     console.log('Connected to MongoDB');
 
     server.listen(PORT, '0.0.0.0', () => {

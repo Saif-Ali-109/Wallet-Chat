@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { encryptMessage, decryptMessage, getPrivateKey } from '../../lib/crypto';
-import { Send, ArrowLeft, Loader2, User as UserIcon, Lock, Check, CheckCheck, Paperclip, File as FileIcon, Mic, Camera, Square, X } from 'lucide-react';
+import { Send, ArrowLeft, Loader2, User as UserIcon, Lock, Check, CheckCheck, Paperclip, File as FileIcon, Mic, Camera, Square, X, Trash2, Info } from 'lucide-react';
 import { uploadMedia, FileAttachment } from '../../lib/media';
 import MediaMessage from '../../components/chat/MediaMessage';
 import Link from 'next/link';
@@ -13,6 +13,9 @@ import { useAccount } from 'wagmi';
 import { io, Socket } from 'socket.io-client';
 import { appendRoomMessage, loadRoomMessages, saveRoomMessages, updateDeliveryState } from '../../lib/localChatStore';
 import { clearAuthSession, getEncryptedItem, loadCachedContacts, saveCachedContacts } from '../../lib/storage';
+import { useENS } from '../../hooks/useENS';
+import { QRCodeSVG } from 'qrcode.react';
+import { clearRoomMessages } from '../../lib/localChatStore';
 import { getApiBaseUrl, getAuthenticatedHeaders, getNetworkErrorMessage, getSessionHealthStatus } from '../../lib/api';
 
 const SERVER_URL = getApiBaseUrl();
@@ -40,12 +43,10 @@ function mergeMessages(...messageGroups: Message[][]) {
   return Array.from(merged.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 }
 
-function ChatContent() {
+function ChatContent({ roomId: roomIdProp }: { roomId?: string }) {
   const [mounted, setMounted] = useState(false);
-  const params = useParams();
   const searchParams = useSearchParams();
   
-  const roomIdFromParams = params?.roomId as string;
   const roomIdFromQuery = searchParams?.get('roomId');
   
   const rawTargetKey = searchParams?.get('publicKey') || '';
@@ -58,7 +59,7 @@ function ChatContent() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [myAddress, setMyAddress] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [roomId, setRoomId] = useState<string | null>(roomIdFromParams || roomIdFromQuery || null);
+  const [roomId, setRoomId] = useState<string | null>(roomIdProp || roomIdFromQuery || null);
   const [initialUnreadId, setInitialUnreadId] = useState<string | null>(null);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +85,25 @@ function ChatContent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+const [showChatInfo, setShowChatInfo] = useState(false);
+const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+const [page, setPage] = useState(1);
+const [hasMore, setHasMore] = useState(true);
+const [loadingMore, setLoadingMore] = useState(false);
+const [isTyping, setIsTyping] = useState(false);
+const typingTimeoutRef = useRef<number | null>(null);
+const [contactOnline, setContactOnline] = useState(false);
+const { ensName: recipientENS } = useENS(recipientAddress);
+const [showTipModal, setShowTipModal] = useState(false);
+const [tipAmount, setTipAmount] = useState('');
+const { sendTip, hash: tipHash, isPending: tipPending, isConfirming: tipConfirming, isConfirmed: tipConfirmed } = useChatContract();
+
+  const handleDeleteChat = () => {
+    if (!roomId) return;
+    clearRoomMessages(roomId);
+    setMessages([]);
+    setShowDeleteConfirm(false);
+  };
 
 
   const { isConnected, address: wagmiAddress } = useAccount();
@@ -129,11 +149,11 @@ function ChatContent() {
     }
   }, [mounted, isAuthorized, loading, focusInput]);
 
-  const classifySocketFailure = useCallback(async (token: string) => {
+  const classifySocketFailure = useCallback(async () => {
     const failureCheckId = ++socketFailureCheckIdRef.current;
 
     try {
-      const status = await getSessionHealthStatus(token);
+      const status = await getSessionHealthStatus();
       const socket = socketRef.current;
 
       if (failureCheckId !== socketFailureCheckIdRef.current || socket?.connected) {
@@ -224,7 +244,7 @@ function ChatContent() {
       
       let activeContact = null;
 
-      const currentRoomId = roomIdFromParams || roomIdFromQuery;
+      const currentRoomId = roomId || roomIdFromQuery;
       if (currentRoomId) {
         // Find contact by roomId
         activeContact = contacts.find((c: any) => {
@@ -260,7 +280,7 @@ function ChatContent() {
       setRoomId(rid);
 
       // If we are on /chat?publicKey=... redirect to /chat?roomId=...
-      if (!roomIdFromQuery && !roomIdFromParams) {
+      if (!roomIdFromQuery && !roomId) {
         router.push(`/chat/${rid}`, { scroll: false });
       }
 
@@ -279,6 +299,7 @@ function ChatContent() {
       }
 
       let nextMessages = localMessages;
+      let totalPages = 1;
 
       try {
         const privateKey = getPrivateKey(storedAddress);
@@ -286,14 +307,18 @@ function ChatContent() {
           throw new Error('Private key not found');
         }
 
-        const res = await fetch(`${SERVER_URL}/chat/messages/${rid}?currentUserId=${storedUserId}`, {
+        const res = await fetch(`${SERVER_URL}/chat/messages/${rid}?currentUserId=${storedUserId}&page=1&limit=20`, {
           headers: getAuthenticatedHeaders(),
         });
-        const remoteMessages = await res.json();
+        const remoteData = await res.json();
 
         if (!res.ok) {
-          throw new Error(remoteMessages.error || 'Failed to fetch room messages');
+          throw new Error(remoteData.error || 'Failed to fetch room messages');
         }
+
+        const remoteMessages = remoteData.messages || [];
+        setHasMore(remoteData.hasMore || false);
+        setPage(1);
 
         const decryptedRemoteMessages: Message[] = await Promise.all(
           (remoteMessages || []).map(async (msg: any) => {
@@ -344,7 +369,7 @@ function ChatContent() {
       setIsAuthorized(false);
       setLoading(false);
     }
-  }, [targetPublicKey, roomIdFromParams, roomIdFromQuery, router, mounted]);
+  }, [targetPublicKey, roomId, roomIdFromQuery, router, mounted]);
 
   useEffect(() => {
     init();
@@ -366,6 +391,49 @@ function ChatContent() {
     }
   }, [mounted, roomId, messages, isAuthorized]);
 
+  const loadMoreMessages = useCallback(async () => {
+    if (!roomId || !userId || loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const res = await fetch(`${SERVER_URL}/chat/messages/${roomId}?currentUserId=${userId}&page=${nextPage}&limit=20`, {
+        headers: getAuthenticatedHeaders(),
+      });
+      const remoteData = await res.json();
+      
+      if (!res.ok) throw new Error(remoteData.error || 'Failed to load messages');
+      
+      const privateKey = getPrivateKey(myAddress || '');
+      if (!privateKey) throw new Error('Private key not found');
+      
+      const decryptedOlderMessages: Message[] = await Promise.all(
+        (remoteData.messages || []).map(async (msg: any) => {
+          const cipher = msg.sender === 'me' ? msg.encryptedContentForSender || msg.text : msg.text;
+          let text = '(Cannot decrypt)';
+          if (cipher) {
+            try { text = await decryptMessage(privateKey, cipher); } catch (e) { console.error('Decrypt error:', e); }
+          }
+          return {
+            id: msg.id,
+            sender: msg.sender,
+            text,
+            timestamp: new Date(msg.createdAt),
+            deliveryState: msg.deliveryState as any,
+          };
+        })
+      );
+      
+      setMessages(prev => [...decryptedOlderMessages.reverse(), ...prev]);
+      setPage(nextPage);
+      setHasMore(remoteData.hasMore || false);
+    } catch (error) {
+      console.error('Failed to load older messages:', error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [roomId, userId, loadingMore, hasMore, page, myAddress]);
+
   useEffect(() => {
     if (document.visibilityState === 'visible') {
       markAsRead();
@@ -382,19 +450,16 @@ function ChatContent() {
   useEffect(() => {
     if (!mounted || !roomId || !myAddress || !isAuthorized || !recipientAddress) return;
     
-    const token = getEncryptedItem('auth_token');
-    if (!token) return;
-
     console.log(`[Socket] Connecting for room ${roomId}`);
     setSocketAuthError(null);
     const socket = io(SERVER_URL, {
-      auth: { token },
       transports: ['polling', 'websocket'], 
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
       timeout: 30000,
+      withCredentials: true, // Send cookies with socket connection
     });
     
     socketRef.current = socket;
@@ -408,23 +473,17 @@ function ChatContent() {
         return;
       }
       
-      void classifySocketFailure(token);
+      void classifySocketFailure();
     });
 
     socket.on('connect', () => {
-      console.log(`[Socket] Connected! ID: ${socket.id}`);
-      socketFailureCheckIdRef.current += 1;
+      console.log('[Socket] CONNECTED');
       setSocketAuthError(null);
-      const joinPayload = {
-        roomId,
-        otherIdentifier: recipientAddress || targetPublicKey || recipientPublicKey || undefined,
-      };
-      console.log('[Socket] Joining room with payload:', joinPayload);
-      socket.emit('join_room', joinPayload);
+      void classifySocketFailure();
     });
 
     socket.io.on('reconnect_attempt', () => {
-      void classifySocketFailure(token);
+      void classifySocketFailure();
     });
 
     socket.io.on('reconnect', () => {
@@ -520,6 +579,30 @@ function ChatContent() {
       updateDeliveryState(roomId, messageId, 'read');
     });
 
+    socket.on('user_typing', ({ userId }) => {
+      if (userId !== userId) {
+        setIsTyping(true);
+      }
+    });
+
+    socket.on('user_stopped_typing', ({ userId }) => {
+      if (userId !== userId) {
+        setIsTyping(false);
+      }
+    });
+
+    socket.on('user_online', ({ userId: onlineUserId }) => {
+      if (onlineUserId === targetUserId) {
+        setContactOnline(true);
+      }
+    });
+
+    socket.on('user_offline', ({ userId: offlineUserId }) => {
+      if (offlineUserId === targetUserId) {
+        setContactOnline(false);
+      }
+    });
+
     return () => {
       socketFailureCheckIdRef.current += 1;
       socket.disconnect();
@@ -561,11 +644,6 @@ function ChatContent() {
       const encryptedContent = await encryptMessage(recipientPublicKey, outgoingText);
       const myPubKey = getEncryptedItem('auth_publicKey') || '';
       const encryptedContentForSender = await encryptMessage(myPubKey, outgoingText);
-
-      const token = getEncryptedItem('auth_token');
-      if (!token) {
-        throw new Error('Session expired. Please reconnect your wallet.');
-      }
 
       if (!socketRef.current?.connected) {
         throw new Error('Real-time connection unavailable. Please reconnect your wallet and try again.');
@@ -768,19 +846,61 @@ function ChatContent() {
                 <div className="w-12 h-12 bg-accent/20 text-accent rounded-full flex items-center justify-center shrink-0 border border-accent/50 font-bold">
                   {customName ? customName[0].toUpperCase() : <UserIcon className="w-5 h-5" />}
                 </div>
-                <div className="flex flex-col overflow-hidden">
-                  <h2 className="font-bold text-lg leading-tight truncate max-w-[200px] text-text-primary">
-                    {customName || "Encrypted Contact"}
-                  </h2>
-                  <p className="text-[10px] font-mono text-text-muted truncate">
-                    {targetPublicKey?.substring(0, 12)}...
-                  </p>
-                </div>
+                    <div className="flex flex-col overflow-hidden">
+                      <h2 className="font-bold text-lg leading-tight truncate max-w-[200px] text-text-primary">
+                        {customName || recipientENS || "Encrypted Contact"}
+                      </h2>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-mono text-text-muted truncate">
+                          {recipientENS || recipientAddress?.substring(0, 12) + '...'}
+                        </p>
+                        {contactOnline ? (
+                          <span className="flex items-center gap-1 text-[10px] text-green-400">
+                            <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                            Online
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-text-muted">Last seen recently</span>
+                        )}
+                      </div>
+                    </div>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowChatInfo(true)} className="p-2 hover:bg-background-tertiary rounded-full transition-colors" title="Chat Info">
+                <Info className="w-5 h-5 text-text-secondary" />
+              </button>
+              <button onClick={() => setShowDeleteConfirm(true)} className="p-2 hover:bg-red-500/20 rounded-full transition-colors" title="Delete Chat">
+                <Trash2 className="w-5 h-5 text-text-secondary hover:text-red-400" />
+              </button>
             </div>
           </div>
 
           <div className="flex-1 bg-background-primary border-x border-border overflow-y-auto p-4 sm:p-6 flex flex-col gap-4">
+            {hasMore && (
+              <div className="flex justify-center">
+                <button
+                  onClick={loadMoreMessages}
+                  disabled={loadingMore}
+                  className="text-xs text-accent hover:underline disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingMore ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : null}
+                  {loadingMore ? 'Loading...' : 'Load older messages'}
+                </button>
+              </div>
+            )}
+            {isTyping && (
+              <div className="flex items-center gap-2 text-text-muted text-xs italic px-2">
+                <span className="flex gap-1">
+                  <span className="w-1 h-1 bg-text-muted rounded-full animate-bounce [animation-delay:0ms]"></span>
+                  <span className="w-1 h-1 bg-text-muted rounded-full animate-bounce [animation-delay:150ms]"></span>
+                  <span className="w-1 h-1 bg-text-muted rounded-full animate-bounce [animation-delay:300ms]"></span>
+                </span>
+                Contact is typing...
+              </div>
+            )}
             {messages.map((msg, index) => {
               const showUnreadSeparator = initialUnreadId === msg.id;
               
@@ -899,7 +1019,20 @@ function ChatContent() {
                     ref={inputRef}
                     type="text"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      if (roomId && socketRef.current?.connected) {
+                        if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
+                        if (!isTyping) {
+                          setIsTyping(true);
+                          socketRef.current.emit('typing_start', { roomId });
+                        }
+                        typingTimeoutRef.current = window.setTimeout(() => {
+                          setIsTyping(false);
+                          socketRef.current?.emit('typing_stop', { roomId });
+                        }, 2000);
+                      }
+                    }}
                     placeholder={mediaUploading ? "Uploading..." : selectedFile ? "Add a caption..." : "Type an encrypted message..."}
                     disabled={mediaUploading}
                     autoFocus
@@ -912,6 +1045,14 @@ function ChatContent() {
                   >
                     {(sending || mediaUploading) ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTipModal(true)}
+                    className="p-4 rounded-2xl flex items-center justify-center bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors border border-yellow-500/30"
+                    title="Send Tip"
+                  >
+                    <span className="text-sm">💎</span>
+                  </button>
                 </>
               )}
               </div>
@@ -921,18 +1062,141 @@ function ChatContent() {
           </div>
         </main>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="bg-background-secondary border border-border rounded-3xl p-6 max-w-sm w-full mx-4 shadow-2xl animate-in zoom-in duration-200">
+            <h3 className="text-lg font-bold mb-3 text-text-primary">Delete Chat</h3>
+            <p className="text-text-secondary text-sm mb-6">
+              Are you sure you want to delete this chat? This will remove all local messages for this conversation.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 py-3 rounded-2xl bg-background-tertiary hover:bg-background-primary text-text-primary font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteChat}
+                className="flex-1 py-3 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-medium transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tip Modal */}
+      {showTipModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={() => setShowTipModal(false)}>
+          <div className="bg-background-secondary border border-border rounded-3xl p-6 max-w-sm w-full mx-4 shadow-2xl animate-in zoom-in duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-text-primary">Send Tip</h3>
+              <button onClick={() => setShowTipModal(false)} className="p-2 hover:bg-background-tertiary rounded-full transition-colors">
+                <X className="w-5 h-5 text-text-secondary" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-text-muted mb-2 block">Amount (ETH)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={tipAmount}
+                  onChange={(e) => setTipAmount(e.target.value)}
+                  placeholder="0.01"
+                  className="w-full bg-background-tertiary border border-border rounded-2xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
+                />
+              </div>
+              {tipHash && (
+                <div className="text-xs text-text-muted break-all">
+                  Tx: {tipHash}
+                  {tipConfirmed && <span className="text-green-400 ml-2">✓ Confirmed</span>}
+                </div>
+              )}
+              <button
+                onClick={async () => {
+                  if (!tipAmount || !recipientAddress) return;
+                  const amountInEth = parseFloat(tipAmount);
+                  if (isNaN(amountInEth) || amountInEth <= 0) return;
+                  const amountInWei = BigInt(Math.floor(amountInEth * 1e18));
+                  try {
+                    await sendTip(recipientAddress, amountInWei);
+                  } catch (err) {
+                    console.error('Tip failed:', err);
+                  }
+                }}
+                disabled={tipPending || !tipAmount}
+                className="w-full py-3 rounded-2xl bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 text-white font-medium transition-colors"
+              >
+                {tipPending ? <Loader2 className="animate-spin w-5 h-5 mx-auto" /> : tipConfirming ? 'Confirming...' : 'Send Tip'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Info Panel */}
+      {showChatInfo && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={() => setShowChatInfo(false)}>
+          <div className="bg-background-secondary border border-border rounded-3xl p-6 max-w-sm w-full mx-4 shadow-2xl animate-in zoom-in duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-text-primary">Chat Info</h3>
+              <button onClick={() => setShowChatInfo(false)} className="p-2 hover:bg-background-tertiary rounded-full transition-colors">
+                <X className="w-5 h-5 text-text-secondary" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 p-4 bg-background-tertiary rounded-2xl">
+                <div className="w-16 h-16 bg-accent/20 text-accent rounded-full flex items-center justify-center shrink-0 border border-accent/50 font-bold text-xl">
+                  {customName ? customName[0].toUpperCase() : <UserIcon className="w-8 h-8" />}
+                </div>
+                <div className="flex flex-col overflow-hidden">
+                  <p className="font-bold text-text-primary truncate">{customName || "Encrypted Contact"}</p>
+                  <p className="text-xs font-mono text-text-muted truncate">{recipientAddress}</p>
+                </div>
+              </div>
+              
+              {/* QR Code for wallet address */}
+              {recipientAddress && (
+                <div className="flex flex-col items-center p-4 bg-background-tertiary rounded-2xl">
+                  <p className="text-sm text-text-muted mb-3">Share Contact QR</p>
+                  <div className="bg-white p-3 rounded-xl">
+                    <QRCodeSVG value={recipientAddress} size={128} />
+                  </div>
+                  <p className="text-xs text-text-muted mt-2">Scan to add contact</p>
+                </div>
+              )}
+              
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between py-2 border-b border-border">
+                  <span className="text-text-muted">Public Key</span>
+                  <span className="font-mono text-text-secondary truncate max-w-[180px]" title={recipientPublicKey || undefined}>
+                    {recipientPublicKey?.substring(0, 20)}...
+                  </span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-border">
+                  <span className="text-text-muted">Messages</span>
+                  <span className="text-text-secondary">{messages.length}</span>
+                </div>
+                <div className="flex justify-between py-2">
+                  <span className="text-text-muted">Room ID</span>
+                  <span className="font-mono text-text-secondary truncate max-w-[180px]" title={roomId || undefined}>
+                    {roomId?.substring(0, 20)}...
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function ChatPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-background-primary flex items-center justify-center">
-        <Loader2 className="w-10 h-10 text-accent animate-spin" />
-      </div>
-    }>
-      <ChatContent />
-    </Suspense>
-  );
+export default function ChatClient({ roomId }: { roomId?: string }) {
+  return <ChatContent roomId={roomId} />;
 }

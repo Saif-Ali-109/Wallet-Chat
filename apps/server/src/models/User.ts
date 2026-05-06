@@ -43,6 +43,9 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+userSchema.index({ publicAddress: 1 });
+userSchema.index({ shortId: 1 });
+
 export interface UserDocument extends mongoose.Document {
   publicAddress: string;
   nonce: string;

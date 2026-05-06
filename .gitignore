@@ -39,3 +39,13 @@ id.json
 package-lock.json
 .env.example
 .idea/
+
+# Web app specific
+apps/web/build.log
+apps/web/build.pid
+apps/web/certificates/
+
+# Recursive patterns
+**/.env
+**/dist/
+**/.next/

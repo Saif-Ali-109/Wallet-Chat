@@ -5,6 +5,10 @@ import { Message } from '../models/Message';
 import { AuthRequest } from '../middleware/auth.middleware';
 import mongoose from 'mongoose';
 
+// Validation regex patterns
+const ROOM_ID_REGEX = /^0x[a-fA-F0-9]+-0x[a-fA-F0-9]+$/;
+const PUBLIC_KEY_REGEX = /^[0-9a-zA-Z+/=]+$/; // Base64url or hex format
+
 const getAuthenticatedUserId = (req: AuthRequest): string =>
   String(req.user?.id || req.user?._id || '');
 
@@ -209,6 +213,11 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Room ID is required' });
     }
 
+    // Validate roomId format (two wallet addresses separated by dash)
+    if (!ROOM_ID_REGEX.test(roomId)) {
+      return res.status(400).json({ error: 'Invalid Room ID format' });
+    }
+
     const user = await User.findById(authenticatedUserId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -228,8 +237,18 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Forbidden: no accepted connection for this room' });
     }
     
-    const messages = await Message.find({ roomId }).sort({ timestamp: 1 });
-    
+    const pageNum = parseInt(req.query.page as string) || 1;
+    const limitNum = parseInt(req.query.limit as string) || 20;
+    const skip = (pageNum - 1) * limitNum;
+
+    const totalCount = await Message.countDocuments({ roomId });
+
+    const messages = await Message.find({ roomId })
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .populate('sender', 'publicAddress shortId');
+
     const formattedMessages = messages.map((msg) => ({
       id: msg._id.toString(),
       sender: msg.sender.toString() === authenticatedUserId ? 'me' : 'other',
@@ -239,7 +258,13 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
       deliveryState: msg.read ? 'read' : 'delivered'
     }));
 
-    return res.status(200).json(formattedMessages);
+    return res.status(200).json({
+      messages: formattedMessages,
+      totalCount,
+      page: pageNum,
+      limit: limitNum,
+      hasMore: skip + messages.length < totalCount,
+    });
   } catch (error) {
     console.error('Error in getMessages:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -258,11 +283,17 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'senderId, recipientPublicKey, and encryptedContent are required' });
     }
 
+    // Validate senderId matches authenticated user
     if (!authenticatedUserId || authenticatedUserId !== String(senderId)) {
       console.error('[REST sendMessage] Sender/token mismatch', {
         authenticatedUserId,
       });
       return res.status(403).json({ error: 'Forbidden: sender does not match authenticated session' });
+    }
+
+    // Validate recipientPublicKey format (base64 or hex)
+    if (!PUBLIC_KEY_REGEX.test(recipientPublicKey)) {
+      return res.status(400).json({ error: 'Invalid recipientPublicKey format' });
     }
 
     const sender = await User.findById(authenticatedUserId);
@@ -490,6 +521,31 @@ export const disconnectChat = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({ message: 'Disconnected successfully' });
   } catch (error) {
     console.error('Error in disconnectChat:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// This will be called from index.ts where `onlineSocketsByUserId` is accessible
+// For the REST endpoint, we'll export a function that checks online status
+let onlineSocketsByUserIdRef: Map<string, Set<string>>;
+
+export const setOnlineSocketsRef = (ref: Map<string, Set<string>>) => {
+  onlineSocketsByUserIdRef = ref;
+};
+
+export const getOnlineStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const authenticatedUserId = getAuthenticatedUserId(req);
+
+    if (!authenticatedUserId) {
+      return res.status(401).json({ error: 'Unauthorized: No active session' });
+    }
+
+    const isOnline = (onlineSocketsByUserIdRef?.get(userId)?.size ?? 0) > 0;
+    return res.status(200).json({ userId, online: !!isOnline });
+  } catch (error) {
+    console.error('Error in getOnlineStatus:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };

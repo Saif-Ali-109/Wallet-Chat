@@ -1,55 +1,20 @@
-const webpack = require('webpack');
 const path = require('path');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'export',
+  // output: 'export', // Disabled for Next.js 15 - dynamic routes need server runtime
 
   images: {
     unoptimized: true,
   },
+
   transpilePackages: [
     'lucide-react',
   ],
+
   webpack: (config, { isServer }) => {
-    // KEY FIX: Add apps/web/node_modules to module resolution paths.
-    // Root-level packages (wagmi, @wagmi/connectors) can't find their peer deps
-    // that are installed locally in apps/web/node_modules. This tells webpack to
-    // always check both locations, fixing all "Module not found" errors at once.
-    config.resolve.modules = [
-      path.resolve(__dirname, 'node_modules'),       // apps/web/node_modules first
-      path.resolve(__dirname, '../../node_modules'), // monorepo root node_modules
-      'node_modules',
-    ];
-
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      pino: require.resolve('pino/browser'),
-      lit: path.resolve(require.resolve('lit'), '../'),
-      porto: path.resolve(__dirname, 'src/stubs/porto'),
-      '@noble/hashes': path.resolve(__dirname, '../../node_modules/@noble/hashes'),
-      '@scure/bip32': path.resolve(__dirname, '../../node_modules/@scure/bip32'),
-      '@scure/bip39': path.resolve(__dirname, '../../node_modules/@scure/bip39'),
-      '@solana/errors': path.resolve(__dirname, 'src/stubs/solana-errors.js'),
-    };
-
-    config.plugins.push(
-      new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
-        resource.request = resource.request.replace(/^node:/, '');
-      })
-    );
-
-    // Fix @scure/bip32 importing 'bytes' from @noble/hashes/_assert (which doesn't exist in v1.8.0)
-    config.plugins.push(
-      new webpack.NormalModuleReplacementPlugin(
-        /@noble\/hashes\/_assert/,
-        (resource) => {
-          resource.request = path.resolve(__dirname, 'src/stubs/noble-hashes-assert.js');
-        }
-      )
-    );
-
+    // Only apply browser polyfills for client-side builds
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -85,15 +50,67 @@ const nextConfig = {
       };
 
       config.plugins.push(
-        new webpack.ProvidePlugin({
+        new (require('webpack')).ProvidePlugin({
           process: 'process/browser',
           Buffer: ['buffer', 'Buffer'],
         })
       );
     }
 
+    // Aliases for packages that need special resolution
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      pino: require.resolve('pino/browser'),
+      lit: path.resolve(require.resolve('lit'), '../'),
+      'porto': path.resolve(__dirname, 'src/stubs/porto/index.js'),
+      'porto/internal': path.resolve(__dirname, 'src/stubs/porto/internal.js'),
+      '@base-org/account': path.resolve(__dirname, 'src/stubs/porto/index.js'),
+      '@noble/hashes': path.resolve(__dirname, '../../node_modules/@noble/hashes'),
+      '@scure/bip32': path.resolve(__dirname, '../../node_modules/@scure/bip32'),
+      '@scure/bip39': path.resolve(__dirname, '../../node_modules/@scure/bip39'),
+      '@solana/errors': path.resolve(__dirname, 'src/stubs/solana-errors.js'),
+      '@react-native-async-storage/async-storage': path.resolve(__dirname, 'src/stubs/react-native-async-storage.js'),
+    };
+
+    // Module replacement plugins
+    config.plugins.push(
+      new (require('webpack')).NormalModuleReplacementPlugin(/^node:/, (resource) => {
+        resource.request = resource.request.replace(/^node:/, '');
+      })
+    );
+
+    // Fix @scure/bip32 importing 'bytes' from @noble/hashes/_assert (which doesn't exist in v1.8.0)
+    config.plugins.push(
+      new (require('webpack')).NormalModuleReplacementPlugin(
+        /@noble\/hashes\/_assert/,
+        (resource) => {
+          resource.request = path.resolve(__dirname, 'src/stubs/noble-hashes-assert.js');
+        }
+      )
+    );
+
+    // Porto stub (if porto package is removed) — only match exact 'porto' not 'porto/internal'
+    config.plugins.push(
+      new (require('webpack')).NormalModuleReplacementPlugin(
+        /^porto$/,
+        (resource) => {
+          resource.request = path.resolve(__dirname, 'src/stubs/porto/index.js');
+        }
+      )
+    );
+
+    // Stub porto/internal
+    config.plugins.push(
+      new (require('webpack')).NormalModuleReplacementPlugin(
+        /^porto\/internal$/,
+        (resource) => {
+          resource.request = path.resolve(__dirname, 'src/stubs/porto/internal.js');
+        }
+      )
+    );
+
     return config;
   },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;

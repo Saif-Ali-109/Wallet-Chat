@@ -30,4 +30,8 @@ const messageSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+messageSchema.index({ roomId: 1, timestamp: -1 });
+messageSchema.index({ sender: 1 });
+messageSchema.index({ read: 1 });
+
 export const Message = mongoose.model('Message', messageSchema);

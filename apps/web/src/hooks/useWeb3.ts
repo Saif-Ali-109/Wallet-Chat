@@ -19,7 +19,7 @@ export function useReadOnlyProvider(): JsonRpcProvider {
   // Hardcoding this URL ensures that even if NEXT_PUBLIC_ANKR_SEPOLIA_RPC 
   // fails to inject during the build, the app will still reach Sepolia.
   const rpcUrl =
-    process.env.NEXT_PUBLIC_ANKR_SEPOLIA_RPC || 
+    process.env.NEXT_PUBLIC_FALLBACK_SEPOLIA_RPC || 
     'https://ethereum-sepolia-rpc.publicnode.com'; // Stable Infura/Alchemy alternative
 
   return useMemo(() => {

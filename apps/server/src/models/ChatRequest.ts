@@ -51,5 +51,8 @@ const chatRequestSchema = new mongoose.Schema<ChatRequestDocument>({
 // Prevent duplicate requests between the same two wallets (direction matters for 'pending')
 // We can also add a logic to prevent reverse requests if one is already pending/accepted
 chatRequestSchema.index({ fromWallet: 1, toWallet: 1 }, { unique: true });
+chatRequestSchema.index({ fromWallet: 1 });
+chatRequestSchema.index({ toWallet: 1 });
+chatRequestSchema.index({ status: 1 });
 
 export const ChatRequest = mongoose.model<ChatRequestDocument>('ChatRequest', chatRequestSchema);

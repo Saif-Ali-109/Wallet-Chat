@@ -2,7 +2,120 @@
 
 This monorepo contains the codebase for a secure, decentralized chat application where users connect their cryptocurrency wallets for authentication and communication. The application is built with a Next.js frontend (web and mobile via Capacitor), an Express/Node.js backend, and interacts with smart contracts on the Ethereum Sepolia network.
 
-## 1. PROJECT OVERVIEW
+## Getting Started
+
+Follow these steps to set up and run the Wallet Chat application locally.
+
+### Prerequisites
+
+*   **Node.js**: v18.x or later (includes npm)
+*   **npm**: v9.x or later
+*   **MongoDB**: An instance of MongoDB (local or cloud-hosted)
+*   **Git**: For cloning the repository
+
+### Installation
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-repo/wallet-chat.git
+    cd wallet-chat
+    ```
+2.  **Install root dependencies:**
+    ```bash
+    npm install
+    ```
+3.  **Install sub-project dependencies:**
+    ```bash
+    npm install --workspace apps/server
+    npm install --workspace apps/web
+    npm install --workspace packages/contracts-solidity
+    npm install --workspace packages/types
+    ```
+
+### Configuration
+
+Each application within the monorepo requires specific environment variables. Create `.env` files based on the provided `.env.example` files in each respective directory.
+
+#### `apps/server/.env`
+
+Create `apps/server/.env` and populate it with the following:
+
+*   `PORT`: The port the Express server will listen on (e.g., `4001`).
+*   `MONGODB_URI`: Connection string for your MongoDB database (e.g., `mongodb://localhost:27017/walletchat`).
+*   `NODE_ENV`: Node.js environment (e.g., `development`).
+*   `JWT_SECRET`: A strong, random secret key for signing and verifying JWTs (e.g., `supersecretjwtkey`).
+*   `JWT_EXPIRES_DAYS`: Expiration time for JWTs (e.g., `7d`).
+*   `CORS_ORIGIN`: Comma-separated list of allowed origins for CORS (e.g., `http://localhost:3000`).
+*   `SEPOLIA_CHAIN_ID`: The chain ID for the Sepolia testnet (e.g., `11155111`).
+*   `SEPOLIA_RPC_URL`: RPC URL for the Sepolia testnet.
+*   `CHAT_REGISTRY_ADDRESS`: The deployed ChatRegistry smart contract address on Sepolia (e.g., `0x...`).
+*   `R2_ACCOUNT_ID`: Cloudflare R2 account ID.
+*   `R2_ACCESS_KEY_ID`: Cloudflare R2 access key ID.
+*   `R2_SECRET_ACCESS_KEY`: Cloudflare R2 secret access key.
+*   `R2_BUCKET`: The name of the Cloudflare R2 bucket.
+*   `R2_PUBLIC_BASE_URL`: Base URL for public access to R2 objects.
+*   `R2_REGION`: Region for the R2 bucket (e.g., `auto`).
+*   `R2_SIGNED_URL_TTL_SECONDS`: Expiration time for R2 signed URLs in seconds.
+*   `MAX_MEDIA_FILE_BYTES`: Maximum allowed media file size in bytes for uploads.
+*   `FCM_PROJECT_ID`: Firebase project ID for push notifications.
+*   `FCM_CLIENT_EMAIL`: Firebase service account client email.
+*   `FCM_PRIVATE_KEY`: Firebase service account private key (multiline, replace `
+` with actual newlines if copying from a single line).
+
+#### `apps/web/.env`
+
+Create `apps/web/.env` and populate it with the following:
+
+*   `NEXT_PUBLIC_SERVER_URL`: URL of the backend server API (e.g., `http://localhost:4001`).
+*   `NEXT_PUBLIC_SOLANA_RPC`: RPC URL for the Solana network.
+*   `NEXT_PUBLIC_EVM_CHAIN_ID`: The chain ID for the target EVM network (e.g., `11155111` for Sepolia).
+*   `NEXT_PUBLIC_ANKR_SEPOLIA_RPC`: Ankr public RPC endpoint for Sepolia (read-only EVM operations).
+*   `NEXT_PUBLIC_ANKR_MAINNET_RPC`: Ankr public RPC endpoint for Ethereum Mainnet (read-only EVM operations).
+*   `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`: Project ID obtained from WalletConnect Cloud.
+*   `NEXT_PUBLIC_CHAT_REGISTRY_ADDRESS`: The deployed ChatRegistry smart contract address on Sepolia (e.g., `0x...`).
+
+#### `packages/contracts-solidity/.env`
+
+Create `packages/contracts-solidity/.env` and populate it with the following:
+
+*   `PRIVATE_KEY`: Private key for deploying contracts (use with caution, for development only, e.g., a test account private key).
+*   `RPC_URL`: RPC URL for the deployment network (e.g., Sepolia RPC URL).
+*   `ETHERSCAN_API_KEY`: API key for Etherscan verification.
+
+### Running the Applications
+
+Each application can be run independently or together.
+
+1.  **Start the Backend Server:**
+    ```bash
+    cd apps/server
+    npm run dev
+    ```
+    The server should start on the port specified in `apps/server/.env` (default `4001`).
+
+2.  **Start the Frontend Web Application:**
+    ```bash
+    cd apps/web
+    npm run dev
+    ```
+    The web application should start on `http://localhost:3000` (default for Next.js).
+
+3.  **Compile Smart Contracts:**
+    ```bash
+    cd packages/contracts-solidity
+    npx hardhat compile
+    ```
+
+4.  **Deploy Smart Contracts (Development):**
+    ```bash
+    cd packages/contracts-solidity
+    npx hardhat run scripts/deploy.ts --network sepolia
+    ```
+    (Ensure `PRIVATE_KEY` and `RPC_URL` are configured in `packages/contracts-solidity/.env` for the target network).
+
+---
+
+## 1. Project Overview
 
 ### What this app does in simple terms
 Wallet Chat is an end-to-end encrypted chat application that leverages blockchain technology for user authentication and identity management. Users sign messages with their cryptocurrency wallets to prove ownership, register public encryption keys on-chain, and exchange secure messages. It supports both EVM-compatible and Solana wallets, allowing users to connect and chat securely across different blockchain ecosystems. Media sharing is facilitated through pre-signed Cloudflare R2 URLs.
@@ -14,7 +127,7 @@ Wallet Chat is an end-to-end encrypted chat application that leverages blockchai
 *   `rimraf`: A `rm -rf` utility for Node.js
 *   `ts-node`: TypeScript execution environment for Node.js
 *   `typescript`: TypeScript language
-*   `events`: Node.js Event Emitter (dependency of `ox`)
+*   `events`: Node.js Event Emitter
 *   `ox`: (Version 0.14.20) - Used for what appears to be core utilities or a framework, heavily overridden in the root `package.json`.
 
 #### `apps/server` (Backend - Express/Node.js)
@@ -28,7 +141,7 @@ Wallet Chat is an end-to-end encrypted chat application that leverages blockchai
 *   **Security**: Helmet, Compression, Express Rate Limit
 *   **Logging**: Morgan
 *   **Utilities**: `bs58`, `dotenv`, `jsonwebtoken`, `multer`, `uuid`, `@types/*` for TypeScript definitions.
-*   **Blockchain Interaction**: `ethers`, `@nomicfoundation/hardhat-verify`, `@nomicfoundation/ignition-core`, `@solana/web3.js`, `@wagmi/connectors`. (Note: `@solana/web3.js`, `@wagmi/connectors` seem to be unused here as direct dependencies, primarily client-side usage).
+*   **Blockchain Interaction**: `ethers`, `@nomicfoundation/hardhat-verify`, `@nomicfoundation/ignition-core`, `@solana/web3.js`, `@wagmi/connectors`.
 
 #### `apps/web` (Frontend - Next.js/React)
 *   **Language**: TypeScript
@@ -41,13 +154,13 @@ Wallet Chat is an end-to-end encrypted chat application that leverages blockchai
     *   `@capacitor/android`, `@capacitor/cli`, `@capacitor/core`: Hybrid mobile app framework
     *   `@coinbase/wallet-sdk`: Coinbase Wallet integration
     *   `@metamask/connect-evm`: MetaMask wallet connector
-    *   `@nomicfoundation/*`: Hardhat related libraries, potentially for testing or local development setup (e.g., `@nomicfoundation/hardhat-chai-matchers`, `@nomicfoundation/hardhat-ethers`, `@nomicfoundation/hardhat-ignition`, `@nomicfoundation/hardhat-toolbox`, `@nomicfoundation/hardhat-verify`).
+    *   `@nomicfoundation/*`: Hardhat related libraries, potentially for testing or local development setup.
     *   `@safe-global/safe-apps-provider`, `@safe-global/safe-apps-sdk`: Safe (Gnosis Safe) integration
     *   `@solana/web3.js`: Solana blockchain interaction
     *   `ethers`: Ethereum utility library
 *   **State Management/Data Fetching**: `@tanstack/react-query`
 *   **UI/Animation**: `framer-motion`, `lucide-react`, `clsx`, `tailwind-merge`
-*   **Utilities**: `assert`, `browserify-zlib`, `buffer`, `crypto-browserify`, `encoding`, `events`, `firebase-admin`, `https-browserify`, `lit`, `lokijs`, `os-browserify`, `path-browserify`, `pino`, `pino-pretty`, `porto`, `process`, `socket.io-client`, `solidity-coverage`, `stream-browserify`, `stream-http`, `url`, `util`. (Many of these are browser polyfills or dependencies of other libraries).
+*   **Utilities**: `assert`, `browserify-zlib`, `buffer`, `crypto-browserify`, `encoding`, `events`, `firebase-admin`, `https-browserify`, `lit`, `lokijs`, `os-browserify`, `path-browserify`, `pino`, `pino-pretty`, `porto`, `process`, `socket.io-client`, `solidity-coverage`, `stream-browserify`, `stream-http`, `url`, `util`.
 
 #### `packages/contracts-solidity` (Smart Contracts)
 *   **Language**: Solidity
@@ -192,7 +305,7 @@ Wallet Chat is an end-to-end encrypted chat application that leverages blockchai
         └── package.json     # Types package dependencies (minimal).
 ```
 
-## 3. ALL API ROUTES (apps/server)
+## 3. API Routes (apps/server)
 
 All routes are prefixed with their respective modules (e.g., `/auth`, `/chat`, `/media`, `/notifications`). All authenticated routes require a JWT in the `Authorization: Bearer <token>` header.
 
@@ -309,7 +422,7 @@ All routes are prefixed with their respective modules (e.g., `/auth`, `/chat`, `
 
 ### Notifications Routes (`/notifications`)
 *   `POST /notifications/send` (Authenticated)
-    *   **Description**: Sends a push notification via Firebase Cloud Messaging (FCM). (Note: This is likely for testing or admin purposes, as general users shouldn't trigger arbitrary notifications).
+    *   **Description**: Sends a push notification via Firebase Cloud Messaging (FCM).
     *   **Parameters**:
         *   `token` (string, required): The FCM device token.
         *   `title` (string, required): Notification title.
@@ -362,7 +475,7 @@ Manages chat connection requests and accepted contacts.
 *   `timestamps`: (Boolean) Mongoose default timestamps (`createdAt`, `updatedAt`).
 *   **Indexes**: Unique index on `{ fromWallet: 1, toWallet: 1 }` to prevent duplicate requests between the same two wallets.
 
-## 5. WALLET & BLOCKCHAIN
+## 5. Wallet & Blockchain
 
 ### How Wallet Connection Works
 The frontend (`apps/web`) uses `wagmi` and `web3modal` to facilitate wallet connections.
@@ -403,56 +516,11 @@ The `ChatRegistry.sol` smart contract provides the following functions:
     *   **Description**: Retrieves the public encryption key for a specific user from the blockchain.
     *   **Called by**: Backend `apps/server` (in `auth.controller.ts` fallback logic) and Frontend `apps/web` via `useEncryptionKey()`.
 
-## 6. ENVIRONMENT VARIABLES
 
-### `apps/server/.env.example`
-*   `PORT`: The port the Express server will listen on.
-*   `MONGODB_URI`: Connection string for the MongoDB database.
-*   `NODE_ENV`: Node.js environment (e.g., `production`, `development`).
-*   `JWT_SECRET`: Secret key for signing and verifying JWTs.
-*   `JWT_EXPIRES_DAYS`: Expiration time for JWTs (e.g., `7d`).
-*   `CORS_ORIGIN`: Comma-separated list of allowed origins for CORS.
-*   `WALLETCONNECT_PROJECT_ID`: Project ID obtained from WalletConnect Cloud.
-*   `SEPOLIA_CHAIN_ID`: The chain ID for the Sepolia testnet (EVM).
-*   `SEPOLIA_RPC_URL`: RPC URL for the Sepolia testnet.
-*   `R2_ACCOUNT_ID`: Cloudflare R2 account ID.
-*   `R2_ACCESS_KEY_ID`: Cloudflare R2 access key ID.
-*   `R2_SECRET_ACCESS_KEY`: Cloudflare R2 secret access key.
-*   `R2_BUCKET`: The name of the Cloudflare R2 bucket.
-*   `R2_PUBLIC_BASE_URL`: Base URL for public access to R2 objects.
-*   `R2_REGION`: Region for the R2 bucket (e.g., `auto`).
-*   `R2_SIGNED_URL_TTL_SECONDS`: Expiration time for R2 signed URLs in seconds.
-*   `MAX_MEDIA_FILE_BYTES`: Maximum allowed media file size in bytes for uploads.
-*   `FCM_PROJECT_ID`: Firebase project ID for push notifications.
-*   `FCM_CLIENT_EMAIL`: Firebase service account client email.
-*   `FCM_PRIVATE_KEY`: Firebase service account private key (multiline, formatted).
 
-### `apps/web/.env.example`
-*   `NEXT_PUBLIC_SERVER_URL`: URL of the backend server API.
-*   `NEXT_PUBLIC_SOLANA_RPC`: RPC URL for the Solana network.
-*   `NEXT_PUBLIC_EVM_CHAIN_ID`: The chain ID for the target EVM network (e.g., Sepolia).
-*   `NEXT_PUBLIC_ANKR_SEPOLIA_RPC`: Ankr public RPC endpoint for Sepolia (read-only EVM operations).
-*   `NEXT_PUBLIC_ANKR_MAINNET_RPC`: Ankr public RPC endpoint for Ethereum Mainnet (read-only EVM operations).
 
-### `packages/contracts-solidity/.env.example`
-*   `PRIVATE_KEY`: Private key for deploying contracts (use with caution, for development only).
-*   `RPC_URL`: RPC URL for the deployment network (e.g., Sepolia).
-*   `ETHERSCAN_API_KEY`: API key for Etherscan verification.
 
-## 7. KNOWN BUGS & ISSUES
-
-*   **Hardcoded Smart Contract Address**: The `CHAT_REGISTRY_ADDRESS` is hardcoded in `apps/server/src/controllers/auth.controller.ts` and `apps/web/src/lib/ethereum.ts`. This should ideally be fetched from a configuration service or environment variable for easier deployment to different networks.
-    *   `apps/server/src/controllers/auth.controller.ts`: L31 `const CHAT_REGISTRY_ADDRESS = '0x878d7cD665048506ed1B233D3945595CDE2ebEc3';`
-    *   `apps/web/src/lib/ethereum.ts`: L65 `export const CHAT_REGISTRY_ADDRESS = '0x878d7cD665048506ed1B233D3945595CDE2ebEc3';`
-*   **Hardcoded WalletConnect Project ID**: The `projectId` for WalletConnect is hardcoded in `apps/web/src/lib/ethereum.ts`. This should be managed via environment variables.
-    *   `apps/web/src/lib/ethereum.ts`: L18 `export const projectId = 'aa08f17d20b4bd829127fd97bbf91f00';`
-*   **Hardcoded RPC URL Fallback**: In `apps/web/src/hooks/useWeb3.ts`, a fallback RPC URL for Sepolia is hardcoded. While it serves as a stable alternative, it bypasses the environment variable configuration if `NEXT_PUBLIC_ANKR_SEPOLIA_RPC` fails.
-    *   `apps/web/src/hooks/useWeb3.ts`: L30 `const rpcUrl = process.env.NEXT_PUBLIC_ANKR_SEPOLIA_RPC || 'https://ethereum-sepolia-rpc.publicnode.com';`
-*   **Capacitor `TODO`s in `native-bridge.js`**:
-    *   `apps/web/android/app/build/intermediates/assets/debug/mergeDebugAssets/native-bridge.js`: Lines 143, 145, 688 show `TODO`s related to exporting functions as Capacitor functions and adding progress event emission on the native side. These are likely development notes for mobile integration.
-*   **Server-side `sendMessage` contract interaction**: The `ChatRegistry.sol` contract has a `sendMessage` function, but the backend's `sendMessage` API route does not appear to interact with this function. Message persistence is handled in MongoDB. This suggests a potential unimplemented feature or a discrepancy between contract design and current backend implementation for on-chain message logging.
-
-## 8. AUTHENTICATION FLOW
+## 6. Authentication Flow
 
 1.  **Wallet Connection**:
     *   The user connects their cryptocurrency wallet (EVM or Solana) to the frontend application.
@@ -479,7 +547,7 @@ The `ChatRegistry.sol` smart contract provides the following functions:
     *   Users can update their public encryption key via `POST /auth/public-key`.
     *   The backend can also retrieve public keys for other users via `GET /auth/public-key/:wallet`, with a fallback to querying the `ChatRegistry` smart contract if the key is not found in the database.
 
-## 9. CHAT SYSTEM
+## 7. Chat System
 
 ### How messages are sent and received
 The chat system uses a hybrid approach:
@@ -502,42 +570,42 @@ Predominantly **real-time** using Socket.IO for active users. The `/chat/message
 *   Messages are stored in a **MongoDB database** in the `Message` collection.
 *   Each message document includes the `sender` (User ObjectId), `roomId` (conversation identifier), `encryptedContent`, `encryptedContentForSender`, `timestamp`, and `read` status.
 
-## 10. DEPENDENCIES
+## 8. Dependencies
 
 ### Root `package.json`
-*   `events`: ^3.3.0 (used by ox)
+*   `events`: ^3.3.0
 *   `ox`: 0.14.20
-*   `rimraf`: ^5.0.0 (development)
-*   `ts-node`: ^10.9.0 (development)
-*   `typescript`: ^5.0.0 (development)
+*   `rimraf`: ^5.0.0
+*   `ts-node`: ^10.9.0
+*   `typescript`: ^5.0.0
 
 ### `apps/server/package.json`
 #### Dependencies
-*   `@aws-sdk/client-s3`: ^3.1035.0 (Cloudflare R2 interaction)
-*   `@aws-sdk/s3-request-presigner`: ^3.1035.0 (Generate signed R2 URLs)
-*   `@nomicfoundation/hardhat-verify`: 3.0.16 (Likely unused on server-side or for testing specific server logic related to contracts)
-*   `@nomicfoundation/ignition-core`: 3.1.4 (Likely unused on server-side or for testing specific server logic related to contracts)
-*   `@solana/web3.js`: ^0.0.3 (Solana signature verification)
-*   `@wagmi/connectors`: 7.2.1 (Likely unused on server-side)
-*   `bs58`: ^6.0.0 (Solana utilities)
-*   `compression`: ^1.8.1 (Gzip compression)
-*   `cors`: ^2.8.6 (CORS middleware)
-*   `dotenv`: ^16.6.1 (Environment variable loading)
-*   `ethers`: ^6.16.0 (EVM signature verification, contract interaction)
-*   `express`: ^4.22.1 (Web framework)
-*   `express-rate-limit`: ^8.4.0 (Rate limiting middleware)
-*   `firebase-admin`: ^10.1.0 (Firebase Cloud Messaging)
-*   `helmet`: ^8.1.0 (Security middleware)
-*   `jsonwebtoken`: ^9.0.3 (JWT handling)
-*   `mongodb-memory-server`: ^10.1.4 (Development/testing in-memory MongoDB)
-*   `mongoose`: ^7.8.9 (MongoDB ORM)
-*   `morgan`: ^1.10.1 (HTTP request logger)
-*   `multer`: ^2.1.1 (Multipart form data handling for file uploads)
-*   `next`: 9.3.3 (Likely unused, typical frontend framework, potentially vestigial) - **Redundant**
-*   `socket.io`: ^4.8.3 (Real-time communication)
-*   `solidity-coverage`: ^0.7.22 (Likely unused on server-side, for contract testing)
-*   `tweetnacl`: ^1.0.3 (Solana signature verification)
-*   `uuid`: ^13.0.0 (UUID generation)
+*   `@aws-sdk/client-s3`: ^3.1035.0
+*   `@aws-sdk/s3-request-presigner`: ^3.1035.0
+*   `@nomicfoundation/hardhat-verify`: 3.0.16
+*   `@nomicfoundation/ignition-core`: 3.1.4
+*   `@solana/web3.js`: ^0.0.3
+*   `@wagmi/connectors`: 7.2.1
+*   `bs58`: ^6.0.0
+*   `compression`: ^1.8.1
+*   `cors`: ^2.8.6
+*   `dotenv`: ^16.6.1
+*   `ethers`: ^6.16.0
+*   `express`: ^4.22.1
+*   `express-rate-limit`: ^8.4.0
+*   `firebase-admin`: ^10.1.0
+*   `helmet`: ^8.1.0
+*   `jsonwebtoken`: ^9.0.3
+*   `mongodb-memory-server`: ^10.1.4
+*   `mongoose`: ^7.8.9
+*   `morgan`: ^1.10.1
+*   `multer`: ^2.1.1
+*   `next`: 9.3.3
+*   `socket.io`: ^4.8.3
+*   `solidity-coverage`: ^0.7.22
+*   `tweetnacl`: ^1.0.3
+*   `uuid`: ^13.0.0
 #### Dev Dependencies
 *   `@types/compression`: ^1.8.1
 *   `@types/cors`: ^2.8.13
@@ -552,20 +620,20 @@ Predominantly **real-time** using Socket.IO for active users. The `/chat/message
 
 ### `apps/web/package.json`
 #### Dependencies
-*   `@base-org/account`: ^2.5.5 (Unused, likely vestigial or specific integration) - **Redundant**
+*   `@base-org/account`: ^2.5.5
 *   `@capacitor/android`: ^8.3.1
 *   `@capacitor/cli`: ^8.3.1
 *   `@capacitor/core`: ^8.3.1
 *   `@coinbase/wallet-sdk`: ^4.3.7
 *   `@metamask/connect-evm`: ^1.0.0
-*   `@nomicfoundation/hardhat-chai-matchers`: 3.0.0 (Unused, Hardhat testing utility) - **Redundant**
-*   `@nomicfoundation/hardhat-ethers`: 4.0.10 (Unused, Hardhat utility) - **Redundant**
-*   `@nomicfoundation/hardhat-ignition`: 3.1.4 (Unused, Hardhat utility) - **Redundant**
-*   `@nomicfoundation/hardhat-ignition-ethers`: 3.1.4 (Unused, Hardhat utility) - **Redundant**
-*   `@nomicfoundation/hardhat-network-helpers`: 3.0.7 (Unused, Hardhat testing utility) - **Redundant**
-*   `@nomicfoundation/hardhat-toolbox`: 7.0.0 (Unused, Hardhat utility) - **Redundant**
-*   `@nomicfoundation/hardhat-verify`: 3.0.16 (Unused, Hardhat utility) - **Redundant**
-*   `@nomicfoundation/ignition-core`: 3.1.4 (Unused, Hardhat utility) - **Redundant**
+*   `@nomicfoundation/hardhat-chai-matchers`: 3.0.0
+*   `@nomicfoundation/hardhat-ethers`: 4.0.10
+*   `@nomicfoundation/hardhat-ignition`: 3.1.4
+*   `@nomicfoundation/hardhat-ignition-ethers`: 3.1.4
+*   `@nomicfoundation/hardhat-network-helpers`: 3.0.7
+*   `@nomicfoundation/hardhat-toolbox`: 7.0.0
+*   `@nomicfoundation/hardhat-verify`: 3.0.16
+*   `@nomicfoundation/ignition-core`: 3.1.4
 *   `@safe-global/safe-apps-provider`: ^0.18.6
 *   `@safe-global/safe-apps-sdk`: ^9.1.0
 *   `@solana/errors`: ^5.5.1
@@ -573,35 +641,35 @@ Predominantly **real-time** using Socket.IO for active users. The `/chat/message
 *   `@tanstack/react-query`: ^5.100.8
 *   `@wagmi/connectors`: ^7.2.1
 *   `@web3modal/wagmi`: ^5.1.11
-*   `assert`: ^2.1.0 (Browser polyfill)
-*   `browserify-zlib`: ^0.2.0 (Browser polyfill)
-*   `buffer`: ^6.0.3 (Browser polyfill)
-*   `clsx`: ^2.1.1 (Utility for conditionally joining class names)
-*   `crypto-browserify`: ^3.5.1 (Browser polyfill)
-*   `encoding`: ^0.1.13 (Browser polyfill)
-*   `events`: ^3.3.0 (Browser polyfill, also used by wagmi)
-*   `firebase-admin`: 10.1.0 (Likely unused in frontend, common backend dependency) - **Redundant**
+*   `assert`: ^2.1.0
+*   `browserify-zlib`: ^0.2.0
+*   `buffer`: ^6.0.3
+*   `clsx`: ^2.1.1
+*   `crypto-browserify`: ^3.5.1
+*   `encoding`: ^0.1.13
+*   `events`: ^3.3.0
+*   `firebase-admin`: 10.1.0
 *   `framer-motion`: ^12.38.0
-*   `https-browserify`: ^1.0.0 (Browser polyfill)
-*   `lit`: ^3.3.2 (Web component library, possibly for WalletConnect UI)
-*   `lokijs`: ^1.5.12 (In-memory database, possibly for local caching)
-*   `lucide-react`: ^1.14.0 (Icon library)
-*   `next`: ^9.3.3 (Core Next.js, version seems old) - **Consider upgrading Next.js.**
-*   `os-browserify`: ^0.3.0 (Browser polyfill)
-*   `path-browserify`: ^1.0.1 (Browser polyfill)
-*   `pino`: ^10.3.1 (Logging)
-*   `pino-pretty`: ^13.1.3 (Pretty logging)
-*   `porto`: ^0.2.37 (Unused) - **Redundant**
-*   `process`: ^0.11.10 (Browser polyfill)
+*   `https-browserify`: ^1.0.0
+*   `lit`: ^3.3.2
+*   `lokijs`: ^1.5.12
+*   `lucide-react`: ^1.14.0
+*   `next`: ^9.3.3
+*   `os-browserify`: ^0.3.0
+*   `path-browserify`: ^1.0.1
+*   `pino`: ^10.3.1
+*   `pino-pretty`: ^13.1.3
+*   `porto`: ^0.2.37
+*   `process`: ^0.11.10
 *   `react`: ^19.2.5
 *   `react-dom`: ^19.2.5
 *   `socket.io-client`: ^4.8.3
-*   `solidity-coverage`: 0.7.22 (Unused, for contract testing) - **Redundant**
-*   `stream-browserify`: ^3.0.0 (Browser polyfill)
-*   `stream-http`: ^3.2.0 (Browser polyfill)
-*   `tailwind-merge`: ^3.5.0 (Utility for Tailwind CSS class merging)
-*   `url`: ^0.11.4 (Browser polyfill)
-*   `util`: ^0.12.5 (Browser polyfill)
+*   `solidity-coverage`: 0.7.22
+*   `stream-browserify`: ^3.0.0
+*   `stream-http`: ^3.2.0
+*   `tailwind-merge`: ^3.5.0
+*   `url`: ^0.11.4
+*   `util`: ^0.12.5
 *   `viem`: latest
 *   `wagmi`: ^3.5.0
 #### Dev Dependencies
@@ -636,15 +704,3 @@ Predominantly **real-time** using Socket.IO for active users. The `/chat/message
 *   `solidity-coverage`: ^0.7.22
 *   `typechain`: ^8.3.2
 #### Dependencies
-*   `@solana/web3.js`: 0.0.3 (Likely unused here, common client-side dependency) - **Redundant**
-*   `@wagmi/connectors`: 7.2.1 (Likely unused here, common client-side dependency) - **Redundant**
-*   `firebase-admin`: 10.1.0 (Likely unused here, common server-side dependency) - **Redundant**
-*   `next`: 9.3.3 (Likely unused, common frontend dependency) - **Redundant**
-
-### Redundant/Unused Dependencies Summary:
-*   `apps/server/package.json`: `next`, `@nomicfoundation/hardhat-verify`, `@nomicfoundation/ignition-core`, `solidity-coverage`, `@wagmi/connectors`
-*   `apps/web/package.json`: `@base-org/account`, `@nomicfoundation/hardhat-chai-matchers`, `@nomicfoundation/hardhat-ethers`, `@nomicfoundation/hardhat-ignition`, `@nomicfoundation/hardhat-ignition-ethers`, `@nomicfoundation/hardhat-network-helpers`, `@nomicfoundation/hardhat-toolbox`, `@nomicfoundation/hardhat-verify`, `@nomicfoundation/ignition-core`, `firebase-admin`, `porto`, `solidity-coverage`
-*   `packages/contracts-solidity/package.json`: `@solana/web3.js`, `@wagmi/connectors`, `firebase-admin`, `next`
-
-These "redundant" packages often appear in monorepos due to shared dependencies or copy-pasting package configurations. It's recommended to review if they are truly necessary for each sub-package or if they can be managed more efficiently at the root level or removed entirely if unused. The `next` version in `apps/web` also seems quite old (`9.3.3`) and should be updated.
-# Wallet-Chat
