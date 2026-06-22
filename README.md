@@ -49,7 +49,7 @@ Follow these steps to set up and run the Wallet Chat application locally.
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/saif634/Wallet-Chat.git
+    git clone https://github.com/Saif-Ali-109/Wallet-Chat.git
     cd Wallet-Chat
     ```
 2.  **Install root dependencies:**
